@@ -1,41 +1,18 @@
-/*
-
-EN = PA2 
-RS PA3  -> 0
-EN PA2  -> 1
-0x08 -> 1000
-0x0E -> 1110
-N=1
-F=0
-0x28 = 00101000
-I/D = 1: Increment
-*/
-// Source - https://stackoverflow.com/q/14166730
-// Posted by nettogrisen
-// Retrieved 2026-07-21, License - CC BY-SA 3.0
-
-//  Connection:
-//
-//  Atmega32    LCD
-//  PB0     ->  DB4
-//  PB1     ->  DB5
-//  PB2     ->  DB6
-//  PB3     ->  DB7
-//  PB4     ->  RS
-//  PB5     ->  R/W
-//  PB6     ->  E
-//  PB7     ->  
-
 #include <avr/io.h>
+#include <stdint.h>
+#define F_CPU 16000000UL
 #include <util/delay.h>
-
+#ifndef PORTB
+#define PORTB (*(volatile uint8_t*)0x25)
+#define DDRB (*(volatile uint8_t*)0x24)
+#endif
 #define LCDPort PORTB
 #define LCDDDR  DDRB
 #define enable 6        //Enable = on
 #define readWrite 5     //Read = on, Write = off
-#define RS 4            //Send command = off, send data = on
+#define RS 4            //Send command = 0, send data = 1
 
-void checkBusy(void);
+
 void updateLCD(void);
 void sendCommand(unsigned char command);
 void sendData(unsigned char character);
@@ -112,7 +89,6 @@ void sendCommand(unsigned char command) {
 
 void sendData(unsigned char character) {
 
-    checkBusy();
     LCDPort &= ~1 << readWrite;                 //Set R/W low and RS high (write data)
     LCDPort |= 1 << RS;
     LCDPort |= (character >> 4 & 15);           //Send 4 ms bits

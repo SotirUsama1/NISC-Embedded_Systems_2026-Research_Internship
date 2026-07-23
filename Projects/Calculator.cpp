@@ -52,12 +52,7 @@ int main(void)
 		
 		unsigned char letter = rowColDecoder_keypad(rowCol);
 		if (!letter) continue;
-		switch (letter)
-		{
-		case '1':
-			
-			break;
-		}
+		else sendData(letter);
 	}
 
 	return 0;
@@ -105,30 +100,30 @@ void sendInitCommand(unsigned char command) {
 }
 
 void LCDInit(){
-		_delay_ms(100);                              //Wait for LCD to boot
-		sendInitCommand(0x3);                        //Init function set 1
-		_delay_ms(100);
-		sendInitCommand(0x3);                        //Init function set 2
-		_delay_us(100);
-		sendInitCommand(0x3);                        //Init function set 3
-		_delay_us(100);
-		sendInitCommand(0x2);                        //Function set (set 4 bit mode)
-		_delay_us(100);
-		sendInitCommand(0x28);                       //Funcion set I=1, N=0, F=0
-		//sendInitCommand(0x8);
-		_delay_us(60);
-		sendInitCommand(0x8);                        //On/off control D=0, C=0, B=0
-		//sendInitCommand(0x8);
-		_delay_us(60);
-		sendCommand(0x01);                           //Clear display
-		//sendInitCommand(0x1);
-		_delay_ms(60);
-		sendCommand(0x06);                           //Entry mode set I/D=1, S=0
-		//sendInitCommand(0x6);
-		_delay_us(60);
-		sendCommand(0x0C);                           //On/off control D=1, C=0, B=0
-		//sendInitCommand(0xC);
-		_delay_us(60);
+	_delay_ms(100);                              //Wait for LCD to boot
+	sendInitCommand(0x3);                        //Init function set 1
+	_delay_ms(100);
+	sendInitCommand(0x3);                        //Init function set 2
+	_delay_us(100);
+	sendInitCommand(0x3);                        //Init function set 3
+	_delay_us(100);
+	sendInitCommand(0x2);                        //Function set (set 4 bit mode)
+	_delay_us(100);
+	sendInitCommand(0x28);                       //Funcion set I=1, N=0, F=0
+	//sendInitCommand(0x8);
+	_delay_us(60);
+	sendInitCommand(0x8);                        //On/off control D=0, C=0, B=0
+	//sendInitCommand(0x8);
+	_delay_us(60);
+	sendCommand(0x01);                           //Clear display
+	//sendInitCommand(0x1);
+	_delay_ms(60);
+	sendCommand(0x06);                           //Entry mode set I/D=1, S=0
+	//sendInitCommand(0x6);
+	_delay_us(60);
+	sendCommand(0x0C);                           //On/off control D=1, C=0, B=0
+	//sendInitCommand(0xC);
+	_delay_us(60);
 }
 
 void rowEn_KeyPad (unsigned char r){
@@ -141,11 +136,12 @@ void rowEn_KeyPad (unsigned char r){
 
 void colRead_keyPad (unsigned char c){
 	unsigned char m = (c==c1)?0x08:(c==c2)?0x04:(c==c1)?0x02:(c==c2)?0x01:0x00;
-	if(!(PIND & (1<<c)))
-	if(!pressed){
-		rowCol |= (1<<m);
-		pressed=1;
-		rowColDecoder_keypad(rowCol);
+	if(!(PIND & (1<<c))){
+		if(!pressed){
+			rowCol |= (1<<m);
+			pressed=1;
+			rowColDecoder_keypad(rowCol);
+		}
 	}
 	else
 	pressed = 0;

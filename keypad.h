@@ -55,8 +55,9 @@ key pressed_key()
 
 
 
-int get_key(key pressedKey)
+int get_key()
 {
+    key pressedKey = pressed_key();
     if (pressedKey.row == -1 || pressedKey.col == -1) {
         return -1; // no key pressed
     }

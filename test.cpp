@@ -33,7 +33,7 @@ void float_to_string(float* value, char *buffer, int precision) {
 
 int main(){
     char str[10];
-    int bits = 0x40f666666; 
+    unsigned int bits = 0x40f66666; 
     float_to_string((float*)&bits, str, 3);
 
     cout << str << endl; // Output: 6.283

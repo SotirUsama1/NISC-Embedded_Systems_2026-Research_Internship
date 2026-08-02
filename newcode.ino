@@ -44,10 +44,10 @@ const char* WIFI_SSID     = "ESP";
 const char* WIFI_PASSWORD = "12345678";
 
 // InfluxDB 3 Core
-// NOTE: update this IP any time your host's DHCP lease changes
-// (very common on phone hotspots). Check with:
-//   ifconfig en0 | grep "inet "        (macOS)
-const char* INFLUXDB_URL      = "http://10.82.55.58:8181";  // Docker host LAN IP
+// NOTE: update this IP any time your host's DHCP lease changes.
+// Check on the Ubuntu Docker host with:
+//   hostname -I
+const char* INFLUXDB_URL      = "http://10.82.55.100:8181";  // Ubuntu Docker host LAN IP
 const char* INFLUXDB_DATABASE = "sensor_monitoring";        // InfluxDB 3 "database" (was "bucket" in v2)
 const char* INFLUXDB_TOKEN    = "";                          // empty = no auth
 

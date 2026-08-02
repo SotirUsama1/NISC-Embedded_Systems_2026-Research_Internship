@@ -66,14 +66,13 @@ int main(void)
 	ph[2] = buffer[5];
 	ph[3] = buffer[6];
 	
-	char str[2];
-	float_to_string((float*) ph, str, 2);
-	for (int i =0; i < 4; i++){
-		itoa((int)buffer[3+i], str, 16);
-		sendDataString(str, 2);
-	}
-	
-	
+	uint8 swapped[4] = { ph[3], ph[2], ph[1], ph[0] };
+	float phValue;
+	memcpy(&phValue, swapped, sizeof(phValue));
+
+	char str[16];                          // generous margin, not exactly-sized
+	float_to_string(&phValue, str, 2);
+	sendDataString(str);
 
 }
 
@@ -158,24 +157,21 @@ void sendDataString(char* str, uint8 length) {
 }
 
 void float_to_string(float* value, char *buffer, int precision) {
-	float val = *value;          // dereference the pointer once
-
+	float val = *value;
 	int is_negative = val < 0;
 	if (is_negative) val = -val;
 
-	int int_part = (int)val;
+	long int_part = (long)val;         // AVR 'int' is only 16-bit; use 'long' (32-bit)
 	float frac_part = val - int_part;
 
 	char *p = buffer;
 	if (is_negative) *p++ = '-';
 
-	// integer part
 	char temp[16]; int i = 0;
 	if (int_part == 0) temp[i++] = '0';
-	while (int_part > 0) { temp[i++] = '0' + (int_part % 10); int_part /= 10; }
+	while (int_part > 0 && i < 15) { temp[i++] = '0' + (int_part % 10); int_part /= 10; }
 	while (i > 0) *p++ = temp[--i];
 
-	// decimal part
 	*p++ = '.';
 	for (int d = 0; d < precision; d++) {
 		frac_part *= 10;

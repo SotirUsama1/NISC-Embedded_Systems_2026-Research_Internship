@@ -39,11 +39,11 @@
  * ═══════════════════════════════════════════════════════════ */
 
 // WiFi
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID     = "ESP";
+const char* WIFI_PASSWORD = "12345678";
 
 // InfluxDB 3 Core
-const char* INFLUXDB_URL      = "http://YOUR_INFLUXDB_IP:8181";  // WSL/server LAN IP
+const char* INFLUXDB_URL      = "http://10.82.55.100:8181";  // WSL/server LAN IP
 const char* INFLUXDB_DATABASE = "sensor_monitoring";
 const char* INFLUXDB_TOKEN    = "";                               // empty = no auth
 

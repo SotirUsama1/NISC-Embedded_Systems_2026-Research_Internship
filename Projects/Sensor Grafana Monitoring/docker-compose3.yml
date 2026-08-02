@@ -3,8 +3,6 @@ services:
   influxdb3:
     image: quay.io/influxdb/influxdb3-core:latest
     container_name: influxdb3
-    networks:
-      - monitoring
     ports:
       - "8181:8181"
     volumes:
@@ -28,12 +26,10 @@ services:
   explorer:
     image: influxdata/influxdb3-ui
     container_name: influxdb3-explorer
-    networks:
-      - monitoring
     ports:
       - "8888:8080"
     command:
-      - --api-url=http://influxdb3:8181
+      - --api-url=http://host.docker.internal:8181
     depends_on:
       influxdb3:
         condition: service_healthy
@@ -43,32 +39,20 @@ services:
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana
-    networks:
-      - monitoring
     ports:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
-      # Completely bypass any injected proxies for internal IPs
-      - HTTP_PROXY=
-      - HTTPS_PROXY=
-      - NO_PROXY=influxdb3,172.18.0.2,localhost,127.0.0.1
-    # Hardwire the DNS to bypass the broken 10.255.255.254 resolver
-    extra_hosts:
-      - "influxdb3:172.18.0.2"
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       influxdb3:
         condition: service_healthy
     restart: unless-stopped
 
-networks:
-  monitoring:
-    driver: bridge
-    # Removed the static IPAM block to prevent WSL/Network conflicts
-
+# ── Persistent volumes ─────────────────────────────────────
 volumes:
   influxdb3-data:
   grafana-data:

@@ -3,8 +3,7 @@ services:
   influxdb3:
     image: quay.io/influxdb/influxdb3-core:latest
     container_name: influxdb3
-    ports:
-      - "8181:8181"
+    network_mode: "host"
     volumes:
       - influxdb3-data:/var/lib/influxdb3
     command:
@@ -16,7 +15,8 @@ services:
       - --without-auth
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8181/health"]
+      # Switched to 127.0.0.1 to avoid native IPv6 localhost mismatch
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8181/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,10 +26,10 @@ services:
   explorer:
     image: influxdata/influxdb3-ui
     container_name: influxdb3-explorer
-    ports:
-      - "8888:8080"
+    network_mode: "host"
     command:
-      - --api-url=http://host.docker.internal:8181
+      # Containers on the host network communicate via localhost/127.0.0.1
+      - --api-url=http://127.0.0.1:8181
     depends_on:
       influxdb3:
         condition: service_healthy
@@ -39,20 +39,17 @@ services:
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana
-    ports:
-      - "3000:3000"
+    network_mode: "host"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       influxdb3:
         condition: service_healthy
     restart: unless-stopped
 
-# ── Persistent volumes ─────────────────────────────────────
 volumes:
   influxdb3-data:
   grafana-data:

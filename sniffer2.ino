@@ -208,15 +208,10 @@ float bytesToFloat(const uint8_t* b) {
   return bytesToFloatOrdered(b, FLOAT_BYTE_ORDER);
 }
 
-// Prints the same 4 bytes decoded under all 4 orderings, so you can
-// visually pick the one that gives a sane value (e.g. pH ~0-14).
-void debugPrintAllOrders(const char* label, const uint8_t* b) {
+// Prints the raw pH/temperature bytes only — no interpretation,
+// no float math, just the exact bytes as received.
+void debugPrintRawBytes(const char* label, const uint8_t* b) {
   Serial.printf("  %s bytes: %02X %02X %02X %02X\n", label, b[0], b[1], b[2], b[3]);
-  Serial.printf("    ABCD=%.4f  DCBA=%.4f  BADC=%.4f  CDAB=%.4f\n",
-    bytesToFloatOrdered(b, ORDER_ABCD),
-    bytesToFloatOrdered(b, ORDER_DCBA),
-    bytesToFloatOrdered(b, ORDER_BADC),
-    bytesToFloatOrdered(b, ORDER_CDAB));
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -257,11 +252,11 @@ void processModbusFrame() {
     return;
   }
 
-  // Debug: show how the raw bytes decode under every possible
-  // Modbus byte order — use this to confirm/adjust FLOAT_BYTE_ORDER
-  Serial.println("[Modbus] Float decode check:");
-  debugPrintAllOrders("pH  ", &frameBuf[3]);
-  debugPrintAllOrders("Temp", &frameBuf[7]);
+  // Debug: show the raw pH/temperature bytes exactly as received,
+  // with no interpretation applied
+  Serial.println("[Modbus] Raw data bytes:");
+  debugPrintRawBytes("pH  ", &frameBuf[3]);
+  debugPrintRawBytes("Temp", &frameBuf[7]);
 
   // Extract pH (bytes 3-6) and temperature (bytes 7-10)
   // using the configured FLOAT_BYTE_ORDER (see bytesToFloat above)

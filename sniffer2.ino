@@ -160,18 +160,55 @@ uint16_t modbusCRC16(const uint8_t* data, size_t len) {
 }
 
 /* ═══════════════════════════════════════════════════════════
- *            Float conversion (big-endian → LE)
+ *            Float conversion — Modbus word/byte order
  * ═══════════════════════════════════════════════════════════ */
+//
+// A 32-bit float sent over Modbus occupies 2 holding registers.
+// Vendors differ on the byte/word order used to pack it:
+//
+//   ABCD  — big-endian, standard order   (A=MSB ... D=LSB)
+//   DCBA  — little-endian, reversed      (already host order)
+//   BADC  — byte-swapped within each 16-bit word
+//   CDAB  — word-swapped, each word still big-endian internally
+//           (very common on industrial/Chinese Modbus sensors —
+//            registers transmitted low-word-first)
+//
+// If your original ABCD-only decode gave garbage pH/temperature,
+// your sensor is very likely using CDAB or BADC instead.
+// Change FLOAT_BYTE_ORDER below once you've identified the
+// correct one from the debug print in processModbusFrame().
 
-// Sensor transmits IEEE 754 floats in big-endian order.
-// Byte-swap to little-endian — same as ATMEGA32 Sensor.cpp:
-//   swapped = { b[3], b[2], b[1], b[0] }
+enum ByteOrder { ORDER_ABCD, ORDER_DCBA, ORDER_BADC, ORDER_CDAB };
 
-float bytesToFloat(const uint8_t* b) {
-  uint8_t swapped[4] = { b[3], b[2], b[1], b[0] };
+#define FLOAT_BYTE_ORDER ORDER_CDAB   // <-- set this once you confirm from Serial output
+
+float bytesToFloatOrdered(const uint8_t* b, ByteOrder order) {
+  uint8_t out[4];
+  switch (order) {
+    case ORDER_ABCD: out[0]=b[3]; out[1]=b[2]; out[2]=b[1]; out[3]=b[0]; break;
+    case ORDER_DCBA: out[0]=b[0]; out[1]=b[1]; out[2]=b[2]; out[3]=b[3]; break;
+    case ORDER_BADC: out[0]=b[2]; out[1]=b[3]; out[2]=b[0]; out[3]=b[1]; break;
+    case ORDER_CDAB: out[0]=b[1]; out[1]=b[0]; out[2]=b[3]; out[3]=b[2]; break;
+  }
   float val;
-  memcpy(&val, swapped, sizeof(val));
+  memcpy(&val, out, sizeof(val));
   return val;
+}
+
+// Convenience wrapper — uses the configured default order
+float bytesToFloat(const uint8_t* b) {
+  return bytesToFloatOrdered(b, FLOAT_BYTE_ORDER);
+}
+
+// Prints the same 4 bytes decoded under all 4 orderings, so you can
+// visually pick the one that gives a sane value (e.g. pH ~0-14).
+void debugPrintAllOrders(const char* label, const uint8_t* b) {
+  Serial.printf("  %s bytes: %02X %02X %02X %02X\n", label, b[0], b[1], b[2], b[3]);
+  Serial.printf("    ABCD=%.4f  DCBA=%.4f  BADC=%.4f  CDAB=%.4f\n",
+    bytesToFloatOrdered(b, ORDER_ABCD),
+    bytesToFloatOrdered(b, ORDER_DCBA),
+    bytesToFloatOrdered(b, ORDER_BADC),
+    bytesToFloatOrdered(b, ORDER_CDAB));
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -212,7 +249,14 @@ void processModbusFrame() {
     return;
   }
 
+  // Debug: show how the raw bytes decode under every possible
+  // Modbus byte order — use this to confirm/adjust FLOAT_BYTE_ORDER
+  Serial.println("[Modbus] Float decode check:");
+  debugPrintAllOrders("pH  ", &frameBuf[3]);
+  debugPrintAllOrders("Temp", &frameBuf[7]);
+
   // Extract pH (bytes 3-6) and temperature (bytes 7-10)
+  // using the configured FLOAT_BYTE_ORDER (see bytesToFloat above)
   lastPH          = bytesToFloat(&frameBuf[3]);
   lastTemperature = bytesToFloat(&frameBuf[7]);
   hasNewData = true;
@@ -347,6 +391,15 @@ void loop() {
       }
 
       lastByteTime = micros();
+
+      // ── Raw sniffer dump (first byte alone, then the rest as one line) ──
+      Serial.printf("[UART] First byte: %02X\n", frameBuf[0]);
+      Serial.printf("[UART] Full frame (%d byte(s)): ", (int)frameLen);
+      for (size_t i = 0; i < frameLen; i++) {
+        Serial.printf("%02X ", frameBuf[i]);
+      }
+      Serial.println();
+
       processModbusFrame();
       frameLen = 0;
     }

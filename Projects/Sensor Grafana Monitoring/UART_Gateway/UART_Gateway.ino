@@ -1,36 +1,24 @@
 /*
  * ============================================================
- *  ESP-WROOM-32  —  Modbus RTU Sniffer → InfluxDB 3 Gateway
+ *  ESP32 — RX2 17-byte Modbus Sniffer -> InfluxDB 3 Gateway
  * ============================================================
  *
- *  Passively sniffs the UART TTL bus shared between an
- *  ATMEGA32 (Modbus master) and a pH/Temperature sensor
- *  (Modbus slave, address 0x03).
+ *  Reads fixed 17-byte packets off UART2 (RX2), extracts pH and
+ *  Temperature from a Modbus RTU "Read Holding Registers" (FC 0x03)
+ *  response, and POSTs the values to InfluxDB 3 Core via HTTP.
  *
- *  Extracts pH and temperature float values from Modbus RTU
- *  "Read Holding Registers" (FC 0x03) responses and POSTs
- *  them to InfluxDB 3 Core via HTTP.
+ *  Frame layout (17 bytes total):
+ *   [addr][func][byteCount][ pH: b0 b1 b2 b3 ][ Temp: b4 b5 b6 b7 ][ 4 unused bytes ][crc_lo][crc_hi]
+ *     1      1        1              4                  4                  4            1      1
  *
- *  ── Master request (sent by ATMEGA32): ──
- *   TX: 03 03 00 00 00 06 C4 2A
- *        │  │  └─────┘ └─────┘ └── CRC-16
- *        │  └─ FC 0x03 (Read Holding Registers)
- *        └─── Slave address 0x03
- *
- *  ── Sensor response: ──
- *   RX: 03 03 0C [b0 b1 b2 b3] [b4 b5 b6 b7] [...] CRC_lo CRC_hi
- *        │  │  │   └─ pH float    └─ Temp float
- *        │  │  └── byte count = 12 (6 regs × 2 bytes)
- *        │  └─ FC 0x03
- *        └─── Slave address 0x03
- *
- *  Floats: big-endian IEEE 754 from sensor → byte-swapped
- *  to little-endian (matches ATMEGA32 Sensor.cpp logic).
+ *  Floats are big-endian IEEE 754 on the wire -> byte-swapped to
+ *  little-endian to match the sensor's transmission format.
  *
  *  Board: "ESP32 Dev Module" in Arduino IDE
  * ============================================================
  */
 
+#include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 
@@ -45,7 +33,7 @@ const char* WIFI_PASSWORD = "12345678";
 // InfluxDB 3 Core
 const char* INFLUXDB_URL      = "http://10.82.55.100:8181";  // WSL/server LAN IP
 const char* INFLUXDB_DATABASE = "sensor_monitoring";
-const char* INFLUXDB_TOKEN    = "";                               // empty = no auth
+const char* INFLUXDB_TOKEN    = "";                           // empty = no auth
 
 // Measurement name written to InfluxDB
 const char* MEASUREMENT = "water_quality";
@@ -56,43 +44,26 @@ const char* MEASUREMENT = "water_quality";
 #define UART_TX_PIN 17   // GPIO17 (TX2) — unused, required by API
 
 // Modbus target
-#define MODBUS_SLAVE_ADDR  0x03   // pH/Temp sensor address
-#define MODBUS_FUNC_CODE   0x03   // Read Holding Registers
+#define MODBUS_SLAVE_ADDR 0x03   // pH/Temp sensor address
+#define MODBUS_FUNC_CODE  0x03   // Read Holding Registers
 
-// Post interval — how often to send data to InfluxDB (ms)
-unsigned long POST_INTERVAL_MS = 5000;
+// Fixed packet length we're sniffing
+#define PACKET_LEN 17
 
-// ─── TEST MODE ──────────────────────────────────────────
-//  true  → sends fake pH/temperature every POST_INTERVAL_MS
-//  false → normal Modbus sniffer mode
-#define TEST_MODE true
+// Post interval — minimum time between InfluxDB writes (ms)
+unsigned long POST_INTERVAL_MS = 1000;
 
 /* ═══════════════════════════════════════════════════════════
  *                   END CONFIGURATION
  * ═══════════════════════════════════════════════════════════ */
 
-HardwareSerial UARTSerial(2);
+HardwareSerial RxSerial(2);   // UART2
 
-// Modbus frame buffer
-#define FRAME_BUF_SIZE 128
-uint8_t frameBuf[FRAME_BUF_SIZE];
-size_t  frameLen = 0;
+uint8_t packetBuf[PACKET_LEN];
+uint8_t packetIdx = 0;
 
-// Inter-character timeout for frame boundary detection
-// 9600 baud: 1 char ≈ 1.04 ms → 3.5 chars ≈ 3.6 ms → use 4 ms
-#define MODBUS_FRAME_TIMEOUT_US 4000
-unsigned long lastByteTime = 0;
-
-// Latest readings
-float lastPH          = 0.0;
-float lastTemperature = 0.0;
-bool  hasNewData      = false;
 unsigned long lastPostTime = 0;
 
-// Test mode
-uint32_t testCounter = 0;
-
-// Status LED
 #define LED_PIN 2
 
 void blinkLED(int times, int ms) {
@@ -151,10 +122,6 @@ uint16_t modbusCRC16(const uint8_t* data, size_t len) {
  *            Float conversion (big-endian → LE)
  * ═══════════════════════════════════════════════════════════ */
 
-// Sensor transmits IEEE 754 floats in big-endian order.
-// Byte-swap to little-endian — same as ATMEGA32 Sensor.cpp:
-//   swapped = { b[3], b[2], b[1], b[0] }
-
 float bytesToFloat(const uint8_t* b) {
   uint8_t swapped[4] = { b[3], b[2], b[1], b[0] };
   float val;
@@ -163,50 +130,17 @@ float bytesToFloat(const uint8_t* b) {
 }
 
 /* ═══════════════════════════════════════════════════════════
- *                  Modbus Frame Parser
+ *                      Debug helpers
  * ═══════════════════════════════════════════════════════════ */
 
-void processModbusFrame() {
-  // Minimum: addr(1) + func(1) + count(1) + data(2) + crc(2) = 7
-  if (frameLen < 5) return;
-
-  uint8_t addr = frameBuf[0];
-  uint8_t func = frameBuf[1];
-
-  // Only process responses from the target sensor
-  if (addr != MODBUS_SLAVE_ADDR || func != MODBUS_FUNC_CODE) return;
-
-  // Verify CRC-16
-  uint16_t rxCRC = frameBuf[frameLen - 2] | (frameBuf[frameLen - 1] << 8);
-  uint16_t calcCRC = modbusCRC16(frameBuf, frameLen - 2);
-  if (rxCRC != calcCRC) {
-    Serial.printf("[Modbus] CRC fail: got 0x%04X, want 0x%04X\n", rxCRC, calcCRC);
-    return;
+void printHex(const uint8_t* data, uint16_t len) {
+  Serial.print("[RAW] ");
+  for (uint16_t i = 0; i < len; i++) {
+    if (data[i] < 0x10) Serial.print('0');
+    Serial.print(data[i], HEX);
+    Serial.print(' ');
   }
-
-  // FC 0x03 response: [addr][func][byte_count][data...][crc_lo][crc_hi]
-  uint8_t byteCount = frameBuf[2];
-
-  // Need at least 8 data bytes for 2 floats (pH + temperature)
-  if (byteCount < 8) {
-    Serial.printf("[Modbus] Too few data bytes: %d (need >= 8)\n", byteCount);
-    return;
-  }
-
-  // Validate frame length: 3 (header) + byteCount + 2 (CRC)
-  if (frameLen != (size_t)(3 + byteCount + 2)) {
-    Serial.printf("[Modbus] Length mismatch: %d vs %d\n",
-                  frameLen, 3 + byteCount + 2);
-    return;
-  }
-
-  // Extract pH (bytes 3-6) and temperature (bytes 7-10)
-  lastPH          = bytesToFloat(&frameBuf[3]);
-  lastTemperature = bytesToFloat(&frameBuf[7]);
-  hasNewData = true;
-
-  Serial.printf("[Modbus] OK | pH=%.2f  Temp=%.1f C  (%d data bytes)\n",
-                lastPH, lastTemperature, byteCount);
+  Serial.println();
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -217,6 +151,9 @@ bool writeToInflux(const String& lineProtocol) {
   String url = String(INFLUXDB_URL)
     + "/api/v2/write?bucket=" + String(INFLUXDB_DATABASE)
     + "&precision=ms";
+
+  Serial.printf("[InfluxDB] POST -> %s\n", url.c_str());
+  Serial.printf("[InfluxDB] Line protocol: %s\n", lineProtocol.c_str());
 
   HTTPClient http;
   http.begin(url);
@@ -239,25 +176,71 @@ bool writeToInflux(const String& lineProtocol) {
 }
 
 void postSensorData(float ph, float temp) {
+  connectWiFi();  // make sure we're still connected before posting
+
   String line = String(MEASUREMENT)
     + ",sensor=ph_temp"
     + " ph=" + String(ph, 2)
     + ",temperature=" + String(temp, 1);
 
-  Serial.printf("[POST] pH=%.2f  Temp=%.1f C -> InfluxDB ... ", ph, temp);
+  Serial.printf("[POST] pH=%.2f  Temp=%.1f C -> InfluxDB\n", ph, temp);
   writeToInflux(line);
+  blinkLED(1, 50);
 }
 
 /* ═══════════════════════════════════════════════════════════
- *                      Test Mode
+ *          Postprocessing: parse the 17-byte packet
  * ═══════════════════════════════════════════════════════════ */
 
-void sendTestData() {
-  testCounter++;
-  float ph   = 7.0  + (float)(random(-150, 150)) / 100.0;  // 5.5–8.5
-  float temp = 25.0 + (float)(random(-50, 50))   / 10.0;   // 20–30 C
+void postprocess_response(uint8_t *data, uint16_t len) {
+  Serial.println("---------------------------------------------");
+  Serial.printf("[Packet] Received %d bytes on RX2\n", len);
+  printHex(data, len);
 
-  Serial.printf("[TEST #%u] pH=%.2f  Temp=%.1f C\n", testCounter, ph, temp);
+  uint8_t addr      = data[0];
+  uint8_t func      = data[1];
+  uint8_t byteCount = data[2];
+
+  Serial.printf("[Modbus] addr=0x%02X  func=0x%02X  byteCount=%d\n",
+                addr, func, byteCount);
+
+  // Step 1: check this is the response we expect
+  if (addr != MODBUS_SLAVE_ADDR || func != MODBUS_FUNC_CODE) {
+    Serial.println("[Modbus] Address/function mismatch — ignoring packet");
+    return;
+  }
+
+  // Step 2: verify CRC-16 (last 2 bytes of the 17)
+  uint16_t rxCRC   = data[len - 2] | (data[len - 1] << 8);
+  uint16_t calcCRC = modbusCRC16(data, len - 2);
+  Serial.printf("[Modbus] CRC received=0x%04X  calculated=0x%04X\n",
+                rxCRC, calcCRC);
+
+  if (rxCRC != calcCRC) {
+    Serial.println("[Modbus] CRC check FAILED — discarding packet");
+    return;
+  }
+  Serial.println("[Modbus] CRC OK");
+
+  // Step 3: sanity-check byte count (need >= 8 data bytes for 2 floats)
+  if (byteCount < 8) {
+    Serial.printf("[Modbus] Too few data bytes: %d (need >= 8)\n", byteCount);
+    return;
+  }
+
+  // Step 4: extract pH (bytes 3-6) and temperature (bytes 11-14)
+  float ph   = bytesToFloat(&data[3]);
+  float temp = bytesToFloat(&data[11]);
+
+  Serial.printf("[Sensor] pH = %.2f   Temperature = %.1f C\n", ph, temp);
+
+  // // Step 5: post to InfluxDB, respecting the minimum post interval
+  // if (millis() - lastPostTime >= POST_INTERVAL_MS) {
+  //   postSensorData(ph, temp);
+  //   lastPostTime = millis();
+  // } else {
+  //   Serial.println("[POST] Skipped — within POST_INTERVAL_MS window");
+  // }
   postSensorData(ph, temp);
 }
 
@@ -268,29 +251,23 @@ void sendTestData() {
 void setup() {
   Serial.begin(115200);
   Serial.println("\n================================================");
-  Serial.println(TEST_MODE
-    ? "  ESP32 Modbus Gateway  [TEST MODE]"
-    : "  ESP32 Modbus RTU Sniffer -> InfluxDB");
+  Serial.println("  ESP32 RX2 17-byte Modbus Sniffer -> InfluxDB");
   Serial.println("================================================");
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  randomSeed(analogRead(0));
 
-  if (!TEST_MODE) {
-    UARTSerial.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
-    Serial.printf("[UART]   RX=GPIO%d  %d baud\n", UART_RX_PIN, UART_BAUD);
-    Serial.printf("[Modbus] Slave 0x%02X  FC 0x%02X\n",
-                  MODBUS_SLAVE_ADDR, MODBUS_FUNC_CODE);
-  }
+  RxSerial.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+  Serial.printf("[UART] RX=GPIO%d  %d baud\n", UART_RX_PIN, UART_BAUD);
+  Serial.printf("[Modbus] Slave 0x%02X  FC 0x%02X  packet len=%d\n",
+                MODBUS_SLAVE_ADDR, MODBUS_FUNC_CODE, PACKET_LEN);
 
   connectWiFi();
 
-  Serial.printf("[Config] Interval: %lu ms\n", POST_INTERVAL_MS);
+  Serial.printf("[Config] Post interval: %lu ms\n", POST_INTERVAL_MS);
   Serial.printf("[Config] InfluxDB: %s -> %s\n\n", INFLUXDB_URL, INFLUXDB_DATABASE);
 
   lastPostTime = millis();
-  lastByteTime = micros();
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -298,44 +275,14 @@ void setup() {
  * ═══════════════════════════════════════════════════════════ */
 
 void loop() {
-  connectWiFi();
+  connectWiFi();  // reconnect automatically if dropped
 
-  if (TEST_MODE) {
-    // ── TEST: send fake data at interval ──
-    if (millis() - lastPostTime >= POST_INTERVAL_MS) {
-      sendTestData();
-      lastPostTime = millis();
-      blinkLED(1, 50);
-    }
+  while (RxSerial.available()) {
+    packetBuf[packetIdx++] = RxSerial.read();
 
-  } else {
-    // ── SNIFFER: read UART, parse Modbus frames ──
-
-    while (UARTSerial.available()) {
-      // Frame boundary: silence > 3.5 char times → previous frame is done
-      if (frameLen > 0 && (micros() - lastByteTime > MODBUS_FRAME_TIMEOUT_US)) {
-        processModbusFrame();
-        frameLen = 0;
-      }
-
-      if (frameLen < FRAME_BUF_SIZE) {
-        frameBuf[frameLen++] = UARTSerial.read();
-      }
-      lastByteTime = micros();
-    }
-
-    // Check timeout when no more bytes
-    if (frameLen > 0 && (micros() - lastByteTime > MODBUS_FRAME_TIMEOUT_US)) {
-      processModbusFrame();
-      frameLen = 0;
-    }
-
-    // Post at configured interval
-    if (hasNewData && (millis() - lastPostTime >= POST_INTERVAL_MS)) {
-      postSensorData(lastPH, lastTemperature);
-      hasNewData   = false;
-      lastPostTime = millis();
-      blinkLED(1, 50);
+    if (packetIdx == PACKET_LEN) {
+      postprocess_response(packetBuf, PACKET_LEN);
+      packetIdx = 0;   // reset for next packet
     }
   }
 }

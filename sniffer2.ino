@@ -47,6 +47,18 @@
 #include <HTTPClient.h>
 
 /* ═══════════════════════════════════════════════════════════
+ *  Modbus float byte order — declared FIRST, before any other
+ *  code. The Arduino IDE auto-generates function prototypes and
+ *  inserts them near the top of the file; if this enum were
+ *  declared further down (after the functions that use it as a
+ *  parameter type), the auto-inserted prototypes would reference
+ *  ByteOrder before it exists, causing a "not declared" error.
+ * ═══════════════════════════════════════════════════════════ */
+enum ByteOrder { ORDER_ABCD, ORDER_DCBA, ORDER_BADC, ORDER_CDAB };
+
+#define FLOAT_BYTE_ORDER ORDER_CDAB   // <-- set this once you confirm from Serial output
+
+/* ═══════════════════════════════════════════════════════════
  *                    USER CONFIGURATION
  * ═══════════════════════════════════════════════════════════ */
 
@@ -175,12 +187,8 @@ uint16_t modbusCRC16(const uint8_t* data, size_t len) {
 //
 // If your original ABCD-only decode gave garbage pH/temperature,
 // your sensor is very likely using CDAB or BADC instead.
-// Change FLOAT_BYTE_ORDER below once you've identified the
-// correct one from the debug print in processModbusFrame().
-
-enum ByteOrder { ORDER_ABCD, ORDER_DCBA, ORDER_BADC, ORDER_CDAB };
-
-#define FLOAT_BYTE_ORDER ORDER_CDAB   // <-- set this once you confirm from Serial output
+// (enum ByteOrder and FLOAT_BYTE_ORDER are declared at the top
+// of this file, right after the #include lines.)
 
 float bytesToFloatOrdered(const uint8_t* b, ByteOrder order) {
   uint8_t out[4];

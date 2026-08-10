@@ -4,13 +4,13 @@ datasources:
   - name: InfluxDB3
     type: influxdb
     access: proxy
-    url: http://host.docker.internal:8181
-    database: sensor_monitoring
+    url: http://localhost:8181
+    database: ""
     jsonData:
+      version: SQL
       dbName: sensor_monitoring
-      httpMode: GET
-      version: InfluxQL
       insecureGrpc: true
       tlsSkipVerify: true
+      pdcInjected: false
     isDefault: true
     editable: true

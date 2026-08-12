@@ -6,11 +6,13 @@
 #include <string.h>
 #include <unistd.h> /* For usleep */
 
+
 /* TI Drivers */
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/UART2.h>
 #include <ti/drivers/dpl/ClockP.h>
 #include <ti/drivers/rf/RF.h>
+
 
 /* Driverlib Header files */
 #include DeviceFamily_constructPath(driverlib / rf_prop_mailbox.h)
@@ -87,7 +89,7 @@ void *mainThread(void *arg0) {
 
   const char startMsg[] =
       "\r\n[SYS] ARM CC1352 Debug Mode Started (Simulated Sensor)\r\n";
-  UART2_write(uartConsole, startMsg, sizeof(startMsg), NULL);
+  UART2_write(uartConsole, startMsg, sizeof(startMsg) - 1, NULL);
 
   /* ==========================================================
    *  RF CONFIGURATION
@@ -106,8 +108,8 @@ void *mainThread(void *arg0) {
     char debugBuf[128];
 
     /* 1. Simulate the Modbus Request text output */
-    const char reqMsg[] = "[SIM] Sending Modbus Request...\r\n";
-    UART2_write(uartConsole, reqMsg, sizeof(reqMsg), NULL);
+    const char reqMsg[] = "[SIM] Sending Modbus Request\r\n";
+    UART2_write(uartConsole, reqMsg, sizeof(reqMsg) - 1, NULL);
 
     /* 2. Construct a simulated 17-byte response
      * Frame: [addr][func][byteCount][pH][4 unused][Temp][crc_lo][crc_hi]
@@ -140,7 +142,7 @@ void *mainThread(void *arg0) {
       /* Output to Console */
       snprintf(debugBuf, sizeof(debugBuf),
                "[SIM] Success -> pH: %.2f | Temp: %.1f C\r\n", ph, temp);
-      UART2_write(uartConsole, debugBuf, strlen(debugBuf), NULL);
+      UART2_write(uartConsole, debugBuf, strlen(debugBuf) - 1, NULL);
 
       /* Pack data for RF Transmission */
       RF_cmdPropTx.pktLen = MODBUS_RX_LEN;
@@ -155,10 +157,10 @@ void *mainThread(void *arg0) {
       /* This block should never be hit in simulation, but kept for structural
        * parity */
       const char errMsg[] = "[ERR] CRC Validation Failed\r\n";
-      UART2_write(uartConsole, errMsg, sizeof(errMsg), NULL);
+      UART2_write(uartConsole, errMsg, sizeof(errMsg) - 1, NULL);
     }
 
     /* 4. Wait 3 seconds before the next simulated cycle */
-    usleep(3000000);
+    sleep(3);
   }
 }

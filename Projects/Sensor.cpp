@@ -41,6 +41,7 @@ void LCDInit();
 void float_to_string(float *value, char *buffer, int precision);
 
 int main(void) {
+  _delay_ms(500);
   LCDDDR |= LCDMask;
   DDRA |= 1 << enable | 1 << RS;
   LCDInit();
@@ -52,6 +53,7 @@ int main(void) {
 
   uint8 buffer[17];
   uint8 command[] = {0x03, 0x03, 0x00, 0x00, 0x00, 0x06, 0xc4, 0x2a};
+  uint16 timeout = 2000;
 
   while (1) {
     UART_DIR_PORT |= 1 << DIR;
@@ -62,7 +64,17 @@ int main(void) {
     UCSRA |= (1 << TXC); // clear the flag (write 1 to clear, per datasheet)
 
     UART_DIR_PORT &= ~(1 << DIR);
-    USART_ReceiveString(buffer, sizeof(buffer));
+    // USART_ReceiveString(buffer, sizeof(buffer));
+    if (!USART_ReceiveStringWithTimeout(buffer, sizeof(buffer), timeout)) {
+      sendCommand(0x01);
+      sendDataString("pH: ---");
+      _delay_ms(5);
+      sendCommand(0x94);
+      sendDataString("Temp: ---");
+      _delay_ms(1000);
+      continue;
+    }
+
     sendCommand(0x01);
 
     float Value;
@@ -84,7 +96,6 @@ int main(void) {
     sendDataString(str);
 
     _delay_ms(10000);
-    sendCommand(0x01);
   }
 }
 

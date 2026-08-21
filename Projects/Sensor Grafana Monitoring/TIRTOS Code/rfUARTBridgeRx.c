@@ -16,13 +16,11 @@
 #include <stdio.h>
 #include <string.h>
 
-
 /* TI Drivers */
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/UART2.h>
 #include <ti/drivers/dpl/ClockP.h>
 #include <ti/drivers/rf/RF.h>
-
 
 /* Driverlib Header files */
 #include DeviceFamily_constructPath(driverlib / rf_prop_mailbox.h)

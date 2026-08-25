@@ -1,0 +1,162 @@
+// @cliArgs --board /ti/boards/LP_CC1352P7_1 --rtos freertos
+
+/*
+ *  border_router_nanostack_mesh_tirf.syscfg
+ */
+
+/* ======== RF ======== */
+var RF = scripting.addModule("/ti/drivers/RF");
+
+/* If an antenna component exists, assign it to the RF instance */
+if (system.deviceData.board && system.deviceData.board.components.RF) {
+    RF.$hardware = system.deviceData.board.components.RF;
+}
+
+/* ======== TRNG ======== */
+var TRNG = scripting.addModule("/ti/drivers/TRNG", {}, false);
+var trng = TRNG.addInstance();
+trng.$name = "NANOSTACK_TRNG";
+
+/* ======== NVS ======== */
+const deviceName = system.getScript("/ti/ti_wisunfan/ti_wisunfan_common.js").getLaunchPadFromDevice();
+var NVS = scripting.addModule("/ti/drivers/NVS");        // Add a NVS module
+var NVS_INT = NVS.addInstance();                         // Add an internal NVS module instance
+
+NVS_INT.$name = "CONFIG_NVSINTERNAL";                    // Internal NVS
+if (deviceName.includes("R7") || deviceName.includes("P7"))
+{
+    NVS_INT.internalFlash.regionBase = 0xA8000;
+}
+else if (deviceName.includes("R10") || deviceName.includes("P10"))
+{
+    NVS_INT.internalFlash.regionBase = 0xFC000;
+}
+else
+{
+    NVS_INT.internalFlash.regionBase = 0x52000;
+}
+NVS_INT.internalFlash.regionSize = 0x4000;
+
+/* ======== Watchdog ======== */
+var Watchdog = scripting.addModule("/ti/drivers/Watchdog", {}, false);
+var Watchdog1 = Watchdog.addInstance();
+
+/* ======== SPI (Replaces UART for NCP) ======== */
+var SPI = scripting.addModule("/ti/drivers/SPI", {}, false);
+var SPI1 = SPI.addInstance();
+SPI1.$name = "CONFIG_SPI_0";
+/* Note: The OpenThread spi-slave.c driver configures the SPI as SLAVE in code,
+   SysConfig handles the physical pin routing. */
+
+/* ======== GPIO (SPI Handshaking for NCP) ======== */
+var GPIO = scripting.addModule("/ti/drivers/GPIO", {}, false);
+
+var GPIO_MRDY = GPIO.addInstance();
+GPIO_MRDY.$name = "CONFIG_GPIO_SPI_MRDY";
+GPIO_MRDY.mode = "Dynamic"; /* spi-slave.c dynamically sets this as Input w/ Falling Edge Interrupt */
+
+var GPIO_SRDY = GPIO.addInstance();
+GPIO_SRDY.$name = "CONFIG_GPIO_SPI_SRDY";
+GPIO_SRDY.mode = "Dynamic"; /* spi-slave.c dynamically sets this as Output */
+
+/* ======== TRNG ======== */
+var TRNG1 = TRNG.addInstance();
+
+/* ======== LED Red ======== */
+var LED = scripting.addModule("/ti/drivers/apps/LED");   // Add a LED module
+var LED_R = LED.addInstance();                           // Add a LED module instance for LED_R
+
+/* If a red LED component exists, assign it to the LED_R instance */
+if (system.deviceData.board && system.deviceData.board.components.LED_RED) {
+    LED_R.$hardware = system.deviceData.board.components.LED_RED;
+}
+else
+{
+    LED_R.mode = "Output";  // Set the LED pin to output
+}
+
+LED_R.$name = "CONFIG_LED_RED";
+LED_R.gpioPin.$name = "CONFIG_GPIO_RLED";               // Descriptive name for the LED_R GPIO
+LED_R.gpioPin.mode = "Output";
+
+/* ======== LED Green ======== */
+var LED = scripting.addModule("/ti/drivers/apps/LED");   // Add a LED module
+var LED_G = LED.addInstance();                           // Add a LED module instance for LED_G
+
+/* If a red LED component exists, assign it to the LED_G instance */
+if (system.deviceData.board && system.deviceData.board.components.LED_GREEN) {
+    LED_G.$hardware = system.deviceData.board.components.LED_GREEN;
+}
+else
+{
+    LED_G.mode = "Output";  // Set the LED pin to output
+}
+
+LED_G.$name = "CONFIG_LED_GREEN";
+LED_G.gpioPin.$name = "CONFIG_GPIO_GLED";               // Descriptive name for the LED_G GPIO
+LED_G.gpioPin.mode = "Output";
+
+/* ======== Left Button ======== */
+var BUTTON = scripting.addModule("/ti/drivers/apps/Button");    // Add a BUTTON module
+var BUTTON_L = BUTTON.addInstance();                            // Add a BUTTON module instance for BUTTON_L
+
+/* If a BUTTON0 component exists, assign it to the BUTTON_L instance */
+if (system.deviceData.board && system.deviceData.board.components["BTN-1"]) {
+    BUTTON_L.$hardware = system.deviceData.board.components["BTN-1"];
+}
+
+BUTTON_L.$name = "CONFIG_BTN_LEFT";
+BUTTON_L.gpioPin.$name = "CONFIG_GPIO_BTN1";             // Descriptive name for the BUTTON_L GPIO
+BUTTON_L.gpioPin.pull = "Pull Up";                       // Use Pull up resistor
+
+/* ======== Right Button ======== */
+var BUTTON = scripting.addModule("/ti/drivers/apps/Button");    // Add a BUTTON module
+var BUTTON_R = BUTTON.addInstance();                            // Add a BUTTON module instance for BUTTON_R
+
+/* If a BUTTON0 component exists, assign it to the BUTTON_R instance */
+if (system.deviceData.board && system.deviceData.board.components["BTN-2"]) {
+    BUTTON_R.$hardware = system.deviceData.board.components["BTN-2"];
+}
+
+BUTTON_R.$name = "CONFIG_BTN_RIGHT";
+BUTTON_R.gpioPin.$name = "CONFIG_GPIO_BTN2";             // Descriptive name for the BUTTON_R GPIO
+BUTTON_R.gpioPin.pull = "Pull Up";                       // Use Pull up resistor
+
+/* ======== RF Design ======== */
+var rfDesign = scripting.addModule("ti/devices/radioconfig/rfdesign");
+const rfDesignSettings = system.getScript("/ti/common/lprf_rf_design_settings.js").rfDesignSettings;
+for(var setting in rfDesignSettings)
+{
+    rfDesign[setting] = rfDesignSettings[setting];
+}
+
+/* ======== TI-15.4 Stack ======== */
+var TI154Stack = scripting.addModule("/ti/ti_wisunfan/ti_wisunfan");
+if(rfDesignSettings.rfDesign !== undefined)
+{
+    TI154Stack.rfDesign = rfDesignSettings.rfDesign;
+}
+
+TI154Stack.project = "borderrouter";
+TI154Stack.lockProject = true;
+TI154Stack.rxOnIdle = true;
+TI154Stack.panID = 0xABCD;
+TI154Stack.secureLevel = "macSecure";
+TI154Stack.rapidJoin = true;
+
+/* ======== Device ======== */
+var device = scripting.addModule("ti/devices/CCFG");
+const ccfgSettings = system.getScript("/ti/common/lprf_ccfg_settings.js").ccfgSettings;
+for(var setting in ccfgSettings)
+{
+    device[setting] = ccfgSettings[setting];
+}
+
+/* ======== RTOS ======== */
+const FreeRTOS = scripting.addModule("/freertos/FreeRTOS");
+FreeRTOS.heapSize = 0x5000;
+FreeRTOS.posixThreadStackSize = 0x00000200;
+FreeRTOS.idleStackSize = 0x00000180;
+FreeRTOS.timerStackSize = 0x00000180;
+
+const POSIX = scripting.addModule("/ti/posix/freertos/Settings");
